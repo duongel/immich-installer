@@ -134,4 +134,146 @@ class ImmichInstallerApp:
         frame3.pack(fill='x', **pad_opts)
         tk.Label(frame3, text="3. Original Photos Storage:", width=25, anchor='w').pack(side='left')
         tk.Entry(frame3, textvariable=self.photos_path).pack(side='left', fill='x', expand=True)
-        tk
+        tk.Button(frame3, text="Browse", command=lambda: self.browse_dir(self.photos_path)).pack(side='left', padx=5)
+
+        # 4. External Library
+        frame4 = tk.Frame(self.root)
+        frame4.pack(fill='x', **pad_opts)
+        tk.Label(frame4, text="4. External Library (HDD):", width=25, anchor='w').pack(side='left')
+        tk.Entry(frame4, textvariable=self.ext_lib_path).pack(side='left', fill='x', expand=True)
+        tk.Button(frame4, text="Browse", command=lambda: self.browse_dir(self.ext_lib_path)).pack(side='left', padx=5)
+
+        # Install Button
+        self.btn_install = tk.Button(self.root, text="INSTALL IMMICH", bg="green", fg="white", font=("Arial", 12, "bold"), command=self.start_install)
+        self.btn_install.pack(pady=20, ipadx=20)
+
+        # Log Window
+        tk.Label(self.root, text="Installation Log:").pack(anchor='w', padx=10)
+        self.log_area = scrolledtext.ScrolledText(self.root, height=15, state='disabled')
+        self.log_area.pack(fill='both', expand=True, padx=10, pady=10)
+
+    def browse_dir(self, var):
+        directory = filedialog.askdirectory()
+        if directory:
+            var.set(directory)
+
+    def log(self, message):
+        self.log_area.configure(state='normal')
+        self.log_area.insert(tk.END, message + "\n")
+        self.log_area.see(tk.END)
+        self.log_area.configure(state='disabled')
+
+    def run_command(self, cmd, sudo_pw=None, cwd=None):
+        """Runs shell command, handling sudo via stdin if needed."""
+        try:
+            if sudo_pw:
+                # Pipe password to sudo -S
+                cmd_str = f"echo '{sudo_pw}' | sudo -S {cmd}"
+                process = subprocess.Popen(cmd_str, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd)
+            else:
+                process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd)
+            
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                raise Exception(f"Command failed: {cmd}\nError: {stderr}")
+            return stdout
+        except Exception as e:
+            raise e
+
+    def install_logic(self):
+        pw = self.root_pass.get()
+        inst_path = self.install_path.get()
+        p_path = self.photos_path.get()
+        ext_path = self.ext_lib_path.get()
+
+        if not all([pw, inst_path, p_path, ext_path]):
+            messagebox.showerror("Error", "All fields are required.")
+            self.btn_install.config(state='normal')
+            return
+
+        try:
+            # 1. Check Docker
+            self.log("Checking for Docker...")
+            try:
+                self.run_command("docker --version")
+                self.log("Docker is already installed.")
+            except:
+                self.log("Docker not found. Installing (this may take a few minutes)...")
+                
+                # --- Docker Install (No curl required) ---
+                self.log("Downloading Docker installation script...")
+                try:
+                    urllib.request.urlretrieve("https://get.docker.com", "get-docker.sh")
+                except Exception as e:
+                    raise Exception(f"Failed to download Docker script: {e}")
+
+                self.log("Running Docker installer...")
+                self.run_command("sh get-docker.sh", sudo_pw=pw)
+                self.log("Docker installed successfully.")
+                
+                # Add user to docker group
+                user = os.getenv('USER')
+                self.log(f"Adding {user} to docker group...")
+                self.run_command(f"usermod -aG docker {user}", sudo_pw=pw)
+            
+            # Ensure Install Directory exists
+            if not os.path.exists(inst_path):
+                os.makedirs(inst_path)
+
+            # 2. Generate Credentials & Config
+            db_password = secrets.token_urlsafe(16)
+            
+            # 3. Create docker-compose.yml
+            compose_content = DOCKER_COMPOSE_TEMPLATE.format(
+                PHOTOS_PATH=p_path,
+                EXTERNAL_LIB_PATH=ext_path,
+                DB_PASSWORD=db_password,
+                INSTALL_PATH=inst_path
+            )
+
+            # 4. Create .env file
+            env_content = ENV_TEMPLATE.format(
+                PHOTOS_PATH=p_path,
+                DB_PASSWORD=db_password
+            )
+
+            self.log(f"Writing configuration files to {inst_path}...")
+            
+            with open(os.path.join(inst_path, "docker-compose.yml"), "w") as f:
+                f.write(compose_content)
+            
+            with open(os.path.join(inst_path, ".env"), "w") as f:
+                f.write(env_content)
+
+            # 5. Start Immich
+            self.log("Starting Immich via Docker Compose...")
+            
+            # Use sudo because if we just added the group, it's not active yet for this process
+            up_cmd = "docker compose up -d"
+            self.run_command(up_cmd, sudo_pw=pw, cwd=inst_path)
+
+            self.log("-----------------------------------------")
+            self.log("SUCCESS! Immich is starting up.")
+            self.log("Please wait a few minutes for the database to initialize.")
+            self.log("Access Immich at: http://localhost:2283")
+            self.log("-----------------------------------------")
+            messagebox.showinfo("Success", "Immich has been installed and started!")
+
+        except Exception as e:
+            self.log(f"ERROR: {str(e)}")
+            messagebox.showerror("Installation Failed", str(e))
+        finally:
+            self.btn_install.config(state='normal')
+            # Clean up installer script if it exists
+            if os.path.exists("get-docker.sh"):
+                os.remove("get-docker.sh")
+
+    def start_install(self):
+        self.btn_install.config(state='disabled')
+        threading.Thread(target=self.install_logic, daemon=True).start()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ImmichInstallerApp(root)
+    root.mainloop()
