@@ -35,7 +35,7 @@ services:
     command: ['start.sh', 'immich']
     volumes:
       - {PHOTOS_PATH}:/usr/src/app/upload
-      - {EXTERNAL_LIB_PATH}:/mnt/external_lib:ro
+      - {EXTERNAL_LIB_PATH}:{EXTERNAL_LIB_PATH}:ro
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Install Immich
+Comment=Auto-installer for Immich on RPi
+# The magic line: Change directory to where this file is (%k), then run python
+Exec=bash -c 'cd "$(dirname "%k")"; python3 installation-script.py'
+Icon=utilities-terminal
+Terminal=false
+Type=Application
+Categories=Utility;
