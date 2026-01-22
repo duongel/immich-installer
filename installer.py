@@ -62,14 +62,14 @@ services:
 
   redis:
     container_name: immich_redis
-    image: redis:6.2-alpine@sha256:70a7a5b66d9c5b52f6479997d7e85267aa6e26389c25983af9376092f6c5e51d
+    image: redis:6.2-alpine
     restart: always
     networks:
       - immich_internal
 
   database:
     container_name: immich_postgres
-    image: registry.hub.docker.com/tensorchord/pgvecto-rs:pg14-v0.2.0@sha256:90724186f0a3517cf6914295b5ab410db9ce23190a2d9d0b9dd6463e3fa298f0
+    image: tensorchord/pgvecto-rs:pg14-v0.2.0
     environment:
       POSTGRES_PASSWORD: {DB_PASSWORD}
       POSTGRES_USER: postgres
