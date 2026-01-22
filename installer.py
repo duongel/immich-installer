@@ -180,4 +180,140 @@ class ImmichInstallerApp:
             
             stdout, stderr = process.communicate()
             
-            if process.returncode !=
+            if process.returncode != 0:
+                raise Exception(f"Command failed: {cmd}\nError: {stderr}")
+            return stdout
+        except Exception as e:
+            raise e
+
+    def run_live_command(self, cmd, sudo_pw=None, cwd=None):
+        """Runs shell command and streams output to log window line-by-line."""
+        try:
+            full_cmd = cmd
+            if sudo_pw:
+                full_cmd = f"echo '{sudo_pw}' | sudo -S {cmd}"
+            
+            # Merge stderr into stdout to capture Docker progress
+            process = subprocess.Popen(
+                full_cmd, 
+                shell=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True, 
+                cwd=cwd,
+                bufsize=1, 
+                universal_newlines=True
+            )
+
+            # Read output stream
+            for line in process.stdout:
+                self.log(line)
+            
+            process.wait()
+            if process.returncode != 0:
+                raise Exception(f"Command failed: {cmd}")
+
+        except Exception as e:
+            raise e
+
+    def install_logic(self):
+        pw = self.root_pass.get()
+        inst_path = self.install_path.get()
+        p_path = self.photos_path.get()
+        ext_path = self.ext_lib_path.get()
+
+        if not all([pw, inst_path, p_path, ext_path]):
+            messagebox.showerror("Error", "All fields are required.")
+            self.btn_install.config(state='normal')
+            return
+
+        try:
+            # 1. Check Docker
+            self.log("Checking for Docker...")
+            try:
+                self.run_command("docker --version")
+                self.log("Docker is already installed.")
+            except:
+                self.log("Docker not found. Installing (this may take a few minutes)...")
+                
+                # --- Docker Install ---
+                self.log("Downloading Docker installation script...")
+                try:
+                    urllib.request.urlretrieve("https://get.docker.com", "get-docker.sh")
+                except Exception as e:
+                    raise Exception(f"Failed to download Docker script: {e}")
+
+                self.log("Running Docker installer...")
+                self.run_command("sh get-docker.sh", sudo_pw=pw)
+                self.log("Docker installed successfully.")
+                
+                # Add user to docker group
+                user = os.getenv('USER')
+                self.log(f"Adding {user} to docker group...")
+                self.run_command(f"usermod -aG docker {user}", sudo_pw=pw)
+            
+            # Ensure Install Directory exists
+            if not os.path.exists(inst_path):
+                os.makedirs(inst_path)
+
+            # 2. Generate Credentials & Config
+            db_password = secrets.token_urlsafe(16)
+            
+            # 3. Create docker-compose.yml
+            compose_content = DOCKER_COMPOSE_TEMPLATE.format(
+                PHOTOS_PATH=p_path,
+                EXTERNAL_LIB_PATH=ext_path,
+                DB_PASSWORD=db_password,
+                INSTALL_PATH=inst_path
+            )
+
+            # 4. Create .env file
+            env_content = ENV_TEMPLATE.format(
+                PHOTOS_PATH=p_path,
+                DB_PASSWORD=db_password
+            )
+
+            self.log(f"Writing configuration files to {inst_path}...")
+            
+            with open(os.path.join(inst_path, "docker-compose.yml"), "w") as f:
+                f.write(compose_content)
+            
+            with open(os.path.join(inst_path, ".env"), "w") as f:
+                f.write(env_content)
+
+            # 5. Pull Images (with logging)
+            self.log("-----------------------------------------")
+            self.log("Downloading Immich Images...")
+            self.log("This may take a while. Please wait...")
+            
+            # We explicitly pull first to show the download logs
+            self.run_live_command("docker compose pull", sudo_pw=pw, cwd=inst_path)
+            
+            # 6. Start Immich
+            self.log("-----------------------------------------")
+            self.log("Starting Immich containers...")
+            self.run_live_command("docker compose up -d", sudo_pw=pw, cwd=inst_path)
+
+            self.log("-----------------------------------------")
+            self.log("SUCCESS! Immich is starting up.")
+            self.log("Please wait a few minutes for the database to initialize.")
+            self.log("Access Immich at: http://<YOUR_PI_IP>:2283")
+            self.log("-----------------------------------------")
+            messagebox.showinfo("Success", "Immich has been installed and started!")
+
+        except Exception as e:
+            self.log(f"ERROR: {str(e)}")
+            messagebox.showerror("Installation Failed", str(e))
+        finally:
+            self.btn_install.config(state='normal')
+            if os.path.exists("get-docker.sh"):
+                os.remove("get-docker.sh")
+
+    def start_install(self):
+        self.btn_install.config(state='disabled')
+        threading.Thread(target=self.install_logic, daemon=True).start()
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ImmichInstallerApp(root)
+    root.mainloop()
