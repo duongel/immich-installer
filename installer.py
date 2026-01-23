@@ -1,612 +1,406 @@
 #!/usr/bin/env python3
-"""
-Immich Installer for Raspberry Pi OS Desktop
-Automatically installs Docker and Immich with user-specified configuration
-Zero external dependencies - uses only built-in Python libraries
-"""
-
 import sys
 import os
 import subprocess
-import secrets
-import string
 import threading
-from pathlib import Path
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+import secrets
+import time
+import urllib.request
 
+# Check for tkinter dependency explicitly to avoid silent crashes
+try:
+    import tkinter as tk
+    from tkinter import filedialog, messagebox, scrolledtext
+except ImportError:
+    print("ERROR: 'tkinter' is missing.")
+    print("Please install it by running: sudo apt install python3-tk -y")
+    sys.exit(1)
 
-class ImmichInstaller:
-    def __init__(self, root):
-        self.root = root
-        self.root.title('Immich Installer for Raspberry Pi')
-        self.root.geometry('750x750')
-        self.root.resizable(False, False)
-        
-        self.create_widgets()
-        
-    def create_widgets(self):
-        # Title
-        title_frame = tk.Frame(self.root, bg='#2196F3', height=80)
-        title_frame.pack(fill=tk.X)
-        title_frame.pack_propagate(False)
-        
-        title = tk.Label(title_frame, text='Immich Installer', 
-                        font=('Arial', 24, 'bold'), bg='#2196F3', fg='white')
-        title.pack(pady=20)
-        
-        # Main content frame
-        main_frame = tk.Frame(self.root, padx=30, pady=20)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Description
-        desc = tk.Label(main_frame, 
-                       text='This installer will automatically set up Immich with Docker on your Raspberry Pi',
-                       wraplength=650, justify=tk.CENTER, font=('Arial', 10))
-        desc.grid(row=0, column=0, columnspan=3, pady=(0, 20))
-        
-        # Root Password
-        tk.Label(main_frame, text='Root/Sudo Password:', 
-                font=('Arial', 10, 'bold')).grid(row=1, column=0, sticky=tk.W, pady=(0, 5))
-        self.root_pass_var = tk.StringVar()
-        self.root_pass_entry = tk.Entry(main_frame, textvariable=self.root_pass_var, 
-                                       show='*', width=50, font=('Arial', 10))
-        self.root_pass_entry.grid(row=2, column=0, columnspan=3, sticky=tk.W+tk.E, pady=(0, 15))
-        
-        # Installation Path
-        tk.Label(main_frame, text='Installation Path:', 
-                font=('Arial', 10, 'bold')).grid(row=3, column=0, sticky=tk.W, pady=(0, 5))
-        self.install_path_var = tk.StringVar(value='/home/pi/immich')
-        self.install_path_entry = tk.Entry(main_frame, textvariable=self.install_path_var, 
-                                          width=40, font=('Arial', 10))
-        self.install_path_entry.grid(row=4, column=0, columnspan=2, sticky=tk.W+tk.E, pady=(0, 5))
-        
-        browse_install_btn = tk.Button(main_frame, text='Browse...', 
-                                       command=self.browse_install_path, width=10)
-        browse_install_btn.grid(row=4, column=2, padx=(5, 0), pady=(0, 5))
-        
-        # Photos Path
-        tk.Label(main_frame, text='Original Photos Location:', 
-                font=('Arial', 10, 'bold')).grid(row=5, column=0, sticky=tk.W, pady=(10, 5))
-        self.photos_path_var = tk.StringVar(value='/mnt/photos')
-        self.photos_path_entry = tk.Entry(main_frame, textvariable=self.photos_path_var, 
-                                         width=40, font=('Arial', 10))
-        self.photos_path_entry.grid(row=6, column=0, columnspan=2, sticky=tk.W+tk.E, pady=(0, 5))
-        
-        browse_photos_btn = tk.Button(main_frame, text='Browse...', 
-                                      command=self.browse_photos_path, width=10)
-        browse_photos_btn.grid(row=6, column=2, padx=(5, 0), pady=(0, 5))
-        
-        # External Library Path
-        tk.Label(main_frame, text='External Library Path:', 
-                font=('Arial', 10, 'bold')).grid(row=7, column=0, sticky=tk.W, pady=(10, 5))
-        self.external_path_var = tk.StringVar(value='/mnt/external-hdd')
-        self.external_path_entry = tk.Entry(main_frame, textvariable=self.external_path_var, 
-                                           width=40, font=('Arial', 10))
-        self.external_path_entry.grid(row=8, column=0, columnspan=2, sticky=tk.W+tk.E, pady=(0, 5))
-        
-        browse_external_btn = tk.Button(main_frame, text='Browse...', 
-                                        command=self.browse_external_path, width=10)
-        browse_external_btn.grid(row=8, column=2, padx=(5, 0), pady=(0, 5))
-        
-        # Checkbox to stop existing Immich instances
-        self.stop_existing_var = tk.BooleanVar(value=True)
-        stop_existing_check = tk.Checkbutton(
-            main_frame, 
-            text='Stop existing Immich instances to avoid port conflicts',
-            variable=self.stop_existing_var,
-            font=('Arial', 10)
-        )
-        stop_existing_check.grid(row=9, column=0, columnspan=3, sticky=tk.W, pady=(15, 5))
-        
-        # Info label for checkbox
-        info_label = tk.Label(
-            main_frame,
-            text='(Recommended: Checks for running Immich containers and stops them before installation)',
-            font=('Arial', 8),
-            fg='#666666',
-            wraplength=650,
-            justify=tk.LEFT
-        )
-        info_label.grid(row=10, column=0, columnspan=3, sticky=tk.W, pady=(0, 15))
-        
-        # Install Button
-        self.install_btn = tk.Button(main_frame, text='Install Immich', 
-                                     command=self.start_installation,
-                                     bg='#4CAF50', fg='white', font=('Arial', 14, 'bold'),
-                                     height=2, cursor='hand2')
-        self.install_btn.grid(row=11, column=0, columnspan=3, sticky=tk.W+tk.E, pady=(10, 15))
-        
-        # Progress Bar
-        self.progress = ttk.Progressbar(main_frame, mode='indeterminate')
-        self.progress.grid(row=12, column=0, columnspan=3, sticky=tk.W+tk.E, pady=(0, 15))
-        
-        # Log Output
-        tk.Label(main_frame, text='Installation Log:', 
-                font=('Arial', 10, 'bold')).grid(row=13, column=0, sticky=tk.W, pady=(0, 5))
-        self.log_text = scrolledtext.ScrolledText(main_frame, height=12, width=80, 
-                                                  font=('Courier', 9), state=tk.DISABLED)
-        self.log_text.grid(row=14, column=0, columnspan=3, sticky=tk.W+tk.E)
-        
-        # Configure grid weights
-        main_frame.columnconfigure(0, weight=1)
-        main_frame.columnconfigure(1, weight=1)
-        
-    def browse_install_path(self):
-        path = filedialog.askdirectory(title='Select Installation Directory')
-        if path:
-            self.install_path_var.set(path)
-    
-    def browse_photos_path(self):
-        path = filedialog.askdirectory(title='Select Photos Directory')
-        if path:
-            self.photos_path_var.set(path)
-    
-    def browse_external_path(self):
-        path = filedialog.askdirectory(title='Select External Library Directory')
-        if path:
-            self.external_path_var.set(path)
-    
-    def log(self, message):
-        """Add message to log output"""
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.insert(tk.END, message + '\n')
-        self.log_text.see(tk.END)
-        self.log_text.config(state=tk.DISABLED)
-        self.root.update()
-    
-    def validate_inputs(self):
-        """Validate all input fields"""
-        if not self.root_pass_var.get():
-            messagebox.showerror('Missing Input', 'Please enter your root/sudo password')
-            return False
-        
-        if not self.install_path_var.get():
-            messagebox.showerror('Missing Input', 'Please specify the installation path')
-            return False
-        
-        if not self.photos_path_var.get():
-            messagebox.showerror('Missing Input', 'Please specify the photos location')
-            return False
-        
-        if not self.external_path_var.get():
-            messagebox.showerror('Missing Input', 'Please specify the external library path')
-            return False
-        
-        # Check if paths exist
-        if not Path(self.photos_path_var.get()).exists():
-            messagebox.showerror('Invalid Path', 'Photos path does not exist')
-            return False
-        
-        if not Path(self.external_path_var.get()).exists():
-            messagebox.showerror('Invalid Path', 'External library path does not exist')
-            return False
-        
-        return True
-    
-    def start_installation(self):
-        """Start the installation process in a separate thread"""
-        if not self.validate_inputs():
-            return
-        
-        # Disable install button and start progress
-        self.install_btn.config(state=tk.DISABLED)
-        self.progress.start(10)
-        self.log_text.config(state=tk.NORMAL)
-        self.log_text.delete(1.0, tk.END)
-        self.log_text.config(state=tk.DISABLED)
-        
-        # Run installation in separate thread to prevent UI freeze
-        thread = threading.Thread(target=self.run_installation, daemon=True)
-        thread.start()
-    
-    def run_installation(self):
-        """Execute the installation steps"""
-        try:
-            # Check for existing Immich instances if checkbox is selected
-            if self.stop_existing_var.get():
-                self.log("Checking for existing Immich instances...")
-                if not self.stop_existing_immich():
-                    self.installation_complete(False, "Failed to stop existing Immich instances")
-                    return
-            
-            # Check Docker installation
-            self.log("Checking Docker installation...")
-            if not self.check_docker():
-                self.log("Docker not found. Installing Docker...")
-                if not self.install_docker():
-                    self.installation_complete(False, "Failed to install Docker")
-                    return
-            else:
-                self.log("Docker is already installed and running")
-            
-            # Create installation directory
-            install_path = Path(self.install_path_var.get())
-            self.log(f"Creating installation directory: {install_path}")
-            install_path.mkdir(parents=True, exist_ok=True)
-            
-            # Generate credentials
-            self.log("Generating secure database credentials...")
-            db_password = self.generate_password()
-            db_username = "immich"
-            db_name = "immich"
-            
-            # Create docker-compose.yml
-            self.log("Creating docker-compose.yml...")
-            compose_content = self.create_docker_compose(
-                install_path,
-                Path(self.photos_path_var.get()),
-                Path(self.external_path_var.get()),
-                db_username, db_password, db_name
-            )
-            compose_file = install_path / "docker-compose.yml"
-            compose_file.write_text(compose_content)
-            self.log(f"Created: {compose_file}")
-            
-            # Create .env file
-            self.log("Creating .env file...")
-            env_content = self.create_env_file(install_path, db_username, db_password, db_name)
-            env_file = install_path / ".env"
-            env_file.write_text(env_content)
-            self.log(f"Created: {env_file}")
-            
-            # Start Immich
-            self.log("Starting Immich containers (this may take a few minutes)...")
-            if not self.start_immich(install_path):
-                self.installation_complete(False, "Failed to start Immich containers")
-                return
-            
-            self.log("✓ Installation completed successfully!")
-            self.installation_complete(True, 
-                "Immich is now running!\n\nAccess it at: http://localhost:2283\n\n" +
-                f"Configuration saved in: {install_path}")
-            
-        except Exception as e:
-            self.log(f"ERROR: {str(e)}")
-            self.installation_complete(False, f"Installation failed: {str(e)}")
-    
-    def stop_existing_immich(self):
-        """Check for and stop existing Immich instances"""
-        try:
-            # Check if docker is available
-            result = subprocess.run(['docker', '--version'], 
-                                  capture_output=True, text=True, timeout=5)
-            if result.returncode != 0:
-                self.log("Docker not installed yet, skipping existing instance check")
-                return True
-            
-            # List all running containers with "immich" in the name
-            self.log("Searching for running Immich containers...")
-            result = subprocess.run(
-                ['docker', 'ps', '--format', '{{.Names}}'],
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if result.returncode != 0:
-                self.log("Could not check for existing containers")
-                return True
-            
-            # Find Immich containers
-            immich_containers = [
-                name for name in result.stdout.strip().split('\n') 
-                if name and 'immich' in name.lower()
-            ]
-            
-            if not immich_containers:
-                self.log("No existing Immich containers found")
-                return True
-            
-            self.log(f"Found {len(immich_containers)} Immich container(s): {', '.join(immich_containers)}")
-            
-            # Check for port 2283 usage
-            self.log("Checking if port 2283 is in use...")
-            port_check = subprocess.run(
-                ['docker', 'ps', '--format', '{{.Names}}: {{.Ports}}'],
-                capture_output=True, text=True, timeout=10
-            )
-            
-            port_conflict = False
-            if '2283' in port_check.stdout or '0.0.0.0:2283' in port_check.stdout:
-                port_conflict = True
-                self.log("⚠ Port 2283 is currently in use by a Docker container")
-            
-            # Stop containers
-            for container in immich_containers:
-                self.log(f"Stopping container: {container}")
-                stop_result = subprocess.run(
-                    ['docker', 'stop', container],
-                    capture_output=True, text=True, timeout=30
-                )
-                
-                if stop_result.returncode == 0:
-                    self.log(f"✓ Stopped: {container}")
-                else:
-                    self.log(f"⚠ Failed to stop {container}: {stop_result.stderr}")
-            
-            # Look for docker-compose projects
-            self.log("Checking for Immich Docker Compose projects...")
-            compose_check = subprocess.run(
-                ['docker', 'compose', 'ls', '--format', 'json'],
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if compose_check.returncode == 0 and 'immich' in compose_check.stdout.lower():
-                self.log("Found Immich Docker Compose project, attempting to stop...")
-                
-                # Try to find and stop compose projects
-                import json
-                try:
-                    projects = json.loads(compose_check.stdout)
-                    for project in projects:
-                        if 'immich' in project.get('Name', '').lower():
-                            project_path = project.get('ConfigFiles', '')
-                            if project_path:
-                                project_dir = Path(project_path).parent
-                                self.log(f"Found project at: {project_dir}")
-                                self.log("Running docker compose down...")
-                                
-                                compose_down = subprocess.run(
-                                    ['docker', 'compose', 'down'],
-                                    cwd=project_dir,
-                                    capture_output=True, text=True, timeout=60
-                                )
-                                
-                                if compose_down.returncode == 0:
-                                    self.log("✓ Successfully stopped Docker Compose project")
-                                else:
-                                    self.log(f"⚠ Compose down failed: {compose_down.stderr}")
-                except json.JSONDecodeError:
-                    self.log("Could not parse compose project list")
-            
-            # Final verification
-            self.log("Verifying port 2283 is now free...")
-            final_check = subprocess.run(
-                ['docker', 'ps', '--format', '{{.Ports}}'],
-                capture_output=True, text=True, timeout=10
-            )
-            
-            if '2283' in final_check.stdout:
-                self.log("⚠ Warning: Port 2283 may still be in use")
-                # Give user option to continue
-                response = messagebox.askyesno(
-                    'Port Conflict',
-                    'Port 2283 appears to still be in use. Continue anyway?'
-                )
-                return response
-            else:
-                self.log("✓ Port 2283 is now available")
-            
-            return True
-            
-        except subprocess.TimeoutExpired:
-            self.log("Timeout while checking for existing instances")
-            return False
-        except Exception as e:
-            self.log(f"Error checking for existing instances: {str(e)}")
-            return False
-    
-    def check_docker(self):
-        """Check if Docker is installed and running"""
-        try:
-            result = subprocess.run(['docker', '--version'], 
-                                  capture_output=True, text=True, timeout=5)
-            if result.returncode != 0:
-                return False
-            
-            # Check if Docker daemon is running
-            result = subprocess.run(['docker', 'ps'], 
-                                  capture_output=True, text=True, timeout=5)
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            return False
-    
-    def install_docker(self):
-        """Install Docker using the official convenience script"""
-        try:
-            root_pass = self.root_pass_var.get()
-            
-            # Download Docker install script using wget (more reliable than curl on Pi)
-            self.log("Downloading Docker installation script...")
-            download_cmd = ['wget', '-O', '/tmp/get-docker.sh', 'https://get.docker.com']
-            result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=60)
-            
-            if result.returncode != 0:
-                # Try with curl as fallback
-                self.log("Trying alternative download method...")
-                download_cmd = ['curl', '-fsSL', 'https://get.docker.com', '-o', '/tmp/get-docker.sh']
-                result = subprocess.run(download_cmd, capture_output=True, text=True, timeout=60)
-                
-                if result.returncode != 0:
-                    self.log(f"Failed to download Docker script: {result.stderr}")
-                    return False
-            
-            # Run install script with sudo
-            self.log("Running Docker installation script (this may take several minutes)...")
-            install_cmd = f'echo {root_pass} | sudo -S sh /tmp/get-docker.sh'
-            result = subprocess.run(install_cmd, shell=True, capture_output=True, 
-                                  text=True, timeout=600)
-            
-            if result.returncode != 0:
-                self.log(f"Docker installation failed: {result.stderr}")
-                return False
-            
-            # Add current user to docker group
-            user = os.getenv('USER', 'pi')
-            self.log(f"Adding user '{user}' to docker group...")
-            add_user_cmd = f'echo {root_pass} | sudo -S usermod -aG docker {user}'
-            subprocess.run(add_user_cmd, shell=True, capture_output=True, text=True)
-            
-            # Start Docker service
-            self.log("Starting Docker service...")
-            start_cmd = f'echo {root_pass} | sudo -S systemctl start docker'
-            subprocess.run(start_cmd, shell=True, capture_output=True, text=True)
-            
-            # Enable Docker service
-            self.log("Enabling Docker to start on boot...")
-            enable_cmd = f'echo {root_pass} | sudo -S systemctl enable docker'
-            subprocess.run(enable_cmd, shell=True, capture_output=True, text=True)
-            
-            self.log("✓ Docker installed successfully")
-            return True
-            
-        except subprocess.TimeoutExpired:
-            self.log("Docker installation timed out")
-            return False
-        except Exception as e:
-            self.log(f"Error installing Docker: {str(e)}")
-            return False
-    
-    def generate_password(self, length=32):
-        """Generate a secure random password"""
-        alphabet = string.ascii_letters + string.digits
-        return ''.join(secrets.choice(alphabet) for _ in range(length))
-    
-    def create_docker_compose(self, install_path, photos_path, external_path, 
-                             db_user, db_pass, db_name):
-        """Create docker-compose.yml content with custom network and volumes"""
-        return f"""version: "3.8"
+# --- Configuration & Templates ---
 
+DOCKER_COMPOSE_TEMPLATE = """
 name: immich
 
 networks:
-  immich-backend:
+  immich_internal:
+    driver: bridge
+    internal: true  # No internet access for backend services
+  immich_public:
     driver: bridge
 
 services:
   immich-server:
     container_name: immich_server
     image: ghcr.io/immich-app/immich-server:release
-    command: ["start.sh", "immich"]
+    command: ['start.sh', 'immich']
     volumes:
-      - {install_path}/upload:/usr/src/app/upload
-      - {photos_path}:/usr/src/app/library:ro
-      - {external_path}:/usr/src/app/external:ro
+      - {PHOTOS_PATH}:/usr/src/app/upload
+      - {EXTERNAL_LIB_PATH}:{EXTERNAL_LIB_PATH}:ro
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env
     ports:
-      - "2283:3001"
+      - 2283:2283
     depends_on:
       - redis
       - database
     restart: always
     networks:
-      - immich-backend
-
-  immich-microservices:
-    container_name: immich_microservices
-    image: ghcr.io/immich-app/immich-server:release
-    command: ["start.sh", "microservices"]
-    volumes:
-      - {install_path}/upload:/usr/src/app/upload
-      - {photos_path}:/usr/src/app/library:ro
-      - {external_path}:/usr/src/app/external:ro
-      - /etc/localtime:/etc/localtime:ro
-    env_file:
-      - .env
-    depends_on:
-      - redis
-      - database
-    restart: always
-    networks:
-      - immich-backend
+      - immich_internal
+      - immich_public
 
   immich-machine-learning:
     container_name: immich_machine_learning
     image: ghcr.io/immich-app/immich-machine-learning:release
     volumes:
-      - {install_path}/model-cache:/cache
+      - model-cache:/cache
     env_file:
       - .env
     restart: always
     networks:
-      - immich-backend
+      - immich_internal
 
   redis:
     container_name: immich_redis
     image: redis:6.2-alpine
     restart: always
     networks:
-      - immich-backend
+      - immich_internal
 
   database:
     container_name: immich_postgres
     image: tensorchord/pgvecto-rs:pg14-v0.2.0
-    env_file:
-      - .env
     environment:
-      POSTGRES_PASSWORD: {db_pass}
-      POSTGRES_USER: {db_user}
-      POSTGRES_DB: {db_name}
+      POSTGRES_PASSWORD: {DB_PASSWORD}
+      POSTGRES_USER: postgres
+      POSTGRES_DB: immich
+      POSTGRES_INITDB_ARGS: '--data-checksums'
     volumes:
-      - {install_path}/postgres:/var/lib/postgresql/data
+      - {INSTALL_PATH}/postgres:/var/lib/postgresql/data
     restart: always
     networks:
-      - immich-backend
+      - immich_internal
+
+volumes:
+  model-cache:
 """
 
-    def create_env_file(self, install_path, db_user, db_pass, db_name):
-        """Create .env file content"""
-        return f"""# Database
-DB_HOSTNAME=database
-DB_USERNAME={db_user}
-DB_PASSWORD={db_pass}
-DB_DATABASE_NAME={db_name}
+ENV_TEMPLATE = """
+# Auto-generated by Installer
+# FORCE BIND TO ALL INTERFACES (Fixes connection issues)
+HOST=0.0.0.0
 
-# Redis
-REDIS_HOSTNAME=redis
-
-# Upload location
-UPLOAD_LOCATION={install_path}/upload
-
-# Machine Learning
+UPLOAD_LOCATION={PHOTOS_PATH}
 IMMICH_MACHINE_LEARNING_URL=http://immich-machine-learning:3003
-
-# Other settings
-TZ=Europe/Berlin
+DB_PASSWORD={DB_PASSWORD}
+DB_HOSTNAME=immich_postgres
+DB_USERNAME=postgres
+DB_DATABASE_NAME=immich
+REDIS_HOSTNAME=immich_redis
 """
 
-    def start_immich(self, install_path):
-        """Start Immich using docker compose"""
-        try:
-            os.chdir(install_path)
-            result = subprocess.run(['docker', 'compose', 'up', '-d'], 
-                                  capture_output=True, text=True, timeout=300)
-            
-            if result.returncode != 0:
-                self.log(f"Failed to start Immich: {result.stderr}")
-                return False
-            
-            self.log("✓ Immich containers started successfully")
-            return True
-            
-        except subprocess.TimeoutExpired:
-            self.log("Starting Immich timed out")
-            return False
-        except Exception as e:
-            self.log(f"Error starting Immich: {str(e)}")
-            return False
-    
-    def installation_complete(self, success, message):
-        """Handle installation completion"""
-        self.root.after(0, lambda: self._show_completion(success, message))
-    
-    def _show_completion(self, success, message):
-        """Show completion dialog (must run in main thread)"""
-        self.progress.stop()
-        self.install_btn.config(state=tk.NORMAL)
+class ImmichInstallerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Immich Installer for Raspberry Pi")
+        self.root.geometry("600x800")  # Increased height for new checkbox
+
+        # Variables
+        self.root_pass = tk.StringVar()
+        self.install_path = tk.StringVar()
+        self.photos_path = tk.StringVar()
+        self.ext_lib_path = tk.StringVar()
+        self.stop_existing_var = tk.BooleanVar(value=True)  # Default: checked
+
+        self._build_ui()
+
+    def _build_ui(self):
+        pad_opts = {'padx': 10, 'pady': 2}
         
-        if success:
-            messagebox.showinfo('Installation Complete', message)
-        else:
-            messagebox.showerror('Installation Failed', message)
+        # Header
+        tk.Label(self.root, text="Immich Auto-Installer", font=("Arial", 16, "bold")).pack(pady=15)
 
+        # 1. Root Password
+        frame1 = tk.Frame(self.root)
+        frame1.pack(fill='x', padx=10, pady=5)
+        tk.Label(frame1, text="Root Password (sudo):", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
+        tk.Entry(frame1, textvariable=self.root_pass, show="*").pack(side='left', fill='x', expand=True)
+        # Hint 1
+        tk.Label(self.root, text="Required to install Docker and system services.", 
+                 fg="gray", font=("Arial", 9)).pack(anchor='w', padx=10)
 
-def main():
+        tk.Frame(self.root, height=10).pack() # Spacer
+
+        # 2. Install Path
+        frame2 = tk.Frame(self.root)
+        frame2.pack(fill='x', padx=10, pady=5)
+        tk.Label(frame2, text="Where to install Immich:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
+        tk.Entry(frame2, textvariable=self.install_path).pack(side='left', fill='x', expand=True)
+        tk.Button(frame2, text="Browse", command=lambda: self.browse_dir(self.install_path)).pack(side='left', padx=5)
+        # Hint 2
+        tk.Label(self.root, text="Absolute path, e.g. /home/<username>/immich", 
+                 fg="gray", font=("Arial", 9)).pack(anchor='w', padx=10)
+
+        tk.Frame(self.root, height=10).pack() # Spacer
+
+        # 3. Photos Path
+        frame3 = tk.Frame(self.root)
+        frame3.pack(fill='x', padx=10, pady=5)
+        tk.Label(frame3, text="Where to store photo files:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
+        tk.Entry(frame3, textvariable=self.photos_path).pack(side='left', fill='x', expand=True)
+        tk.Button(frame3, text="Browse", command=lambda: self.browse_dir(self.photos_path)).pack(side='left', padx=5)
+        # Hint 3
+        tk.Label(self.root, text="Absolute path, e.g. /mnt/external_drive/photos", 
+                 fg="gray", font=("Arial", 9)).pack(anchor='w', padx=10)
+
+        tk.Frame(self.root, height=10).pack() # Spacer
+
+        # 4. External Library
+        frame4 = tk.Frame(self.root)
+        frame4.pack(fill='x', padx=10, pady=5)
+        tk.Label(frame4, text="External Library Path:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
+        tk.Entry(frame4, textvariable=self.ext_lib_path).pack(side='left', fill='x', expand=True)
+        tk.Button(frame4, text="Browse", command=lambda: self.browse_dir(self.ext_lib_path)).pack(side='left', padx=5)
+        # Hint 4
+        tk.Label(self.root, text="Absolute path, e.g. /mnt/nas/photos", 
+                 fg="gray", font=("Arial", 9)).pack(anchor='w', padx=10)
+
+        tk.Frame(self.root, height=15).pack() # Spacer
+
+        # 5. Checkbox to stop existing Immich instances
+        stop_frame = tk.Frame(self.root)
+        stop_frame.pack(fill='x', padx=10, pady=5)
+        
+        stop_existing_check = tk.Checkbutton(
+            stop_frame, 
+            text='Stop existing Immich instances before installation',
+            variable=self.stop_existing_var,
+            font=('Arial', 10, 'bold')
+        )
+        stop_existing_check.pack(anchor='w')
+        
+        # Info label for checkbox
+        info_label = tk.Label(
+            stop_frame,
+            text='Recommended: Prevents port conflicts by stopping all running Immich containers',
+            font=('Arial', 9),
+            fg='#666666',
+            wraplength=550,
+            justify=tk.LEFT
+        )
+        info_label.pack(anchor='w', padx=25)
+
+        # Install Button
+        self.btn_install = tk.Button(self.root, text="INSTALL IMMICH", bg="green", fg="white", font=("Arial", 12, "bold"), command=self.start_install)
+        self.btn_install.pack(pady=25, ipadx=20)
+
+        # Log Window
+        tk.Label(self.root, text="Installation Log:").pack(anchor='w', padx=10)
+        self.log_area = scrolledtext.ScrolledText(self.root, height=12, state='disabled')
+        self.log_area.pack(fill='both', expand=True, padx=10, pady=(0, 10))
+
+    def browse_dir(self, var):
+        directory = filedialog.askdirectory()
+        if directory:
+            var.set(directory)
+
+    def log(self, message):
+        """Thread-safe logging to the text area"""
+        def _log():
+            self.log_area.configure(state='normal')
+            self.log_area.insert(tk.END, str(message).strip() + "\n")
+            self.log_area.see(tk.END)
+            self.log_area.configure(state='disabled')
+        self.root.after(0, _log)
+
+    def run_command(self, cmd, sudo_pw=None, cwd=None):
+        """Runs shell command and waits for result (no streaming)."""
+        try:
+            if sudo_pw:
+                cmd_str = f"echo '{sudo_pw}' | sudo -S {cmd}"
+                process = subprocess.Popen(cmd_str, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd)
+            else:
+                process = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd)
+            
+            stdout, stderr = process.communicate()
+            
+            if process.returncode != 0:
+                raise Exception(f"Command failed: {cmd}\nError: {stderr}")
+            return stdout
+        except Exception as e:
+            raise e
+
+    def run_live_command(self, cmd, sudo_pw=None, cwd=None):
+        """Runs shell command and streams output to log window line-by-line."""
+        try:
+            full_cmd = cmd
+            if sudo_pw:
+                full_cmd = f"echo '{sudo_pw}' | sudo -S {cmd}"
+            
+            # Merge stderr into stdout to capture Docker progress
+            process = subprocess.Popen(
+                full_cmd, 
+                shell=True, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True, 
+                cwd=cwd,
+                bufsize=1
+            )
+
+            # Read output stream
+            for line in process.stdout:
+                self.log(line)
+            
+            process.wait()
+            if process.returncode != 0:
+                raise Exception(f"Command failed: {cmd}")
+
+        except Exception as e:
+            raise e
+
+    def stop_existing_immich(self, sudo_pw):
+        """Stop all running Immich containers"""
+        try:
+            self.log("Checking for existing Immich containers...")
+            
+            # Find all running containers with 'immich' in the name
+            result = self.run_command("docker ps -q --filter name=immich", sudo_pw=sudo_pw)
+            
+            if result.strip():
+                container_ids = result.strip().split('\n')
+                self.log(f"Found {len(container_ids)} running Immich container(s)")
+                
+                # Stop containers
+                self.log("Stopping existing Immich containers...")
+                self.run_command(f"docker container stop {' '.join(container_ids)}", sudo_pw=sudo_pw)
+                self.log("Existing Immich containers stopped successfully")
+                
+                # Optional: Remove stopped containers
+                self.log("Removing stopped Immich containers...")
+                self.run_command(f"docker container rm {' '.join(container_ids)}", sudo_pw=sudo_pw)
+                self.log("Stopped containers removed")
+            else:
+                self.log("No existing Immich containers found")
+                
+        except Exception as e:
+            # Log warning but don't fail installation
+            self.log(f"Warning: Could not stop existing containers: {e}")
+            self.log("Continuing with installation...")
+
+    def install_logic(self):
+        pw = self.root_pass.get()
+        inst_path = self.install_path.get()
+        p_path = self.photos_path.get()
+        ext_path = self.ext_lib_path.get()
+
+        if not all([pw, inst_path, p_path, ext_path]):
+            messagebox.showerror("Error", "All fields are required.")
+            self.btn_install.config(state='normal')
+            return
+
+        try:
+            # 1. Check Docker
+            self.log("Checking for Docker...")
+            docker_installed = False
+            try:
+                self.run_command("docker --version")
+                self.log("Docker is already installed.")
+                docker_installed = True
+            except:
+                self.log("Docker not found. Installing...")
+                
+                # --- Docker Install ---
+                self.log("Downloading Docker installation script...")
+                try:
+                    urllib.request.urlretrieve("https://get.docker.com", "get-docker.sh")
+                except Exception as e:
+                    raise Exception(f"Failed to download Docker script: {e}")
+
+                self.log("Running Docker installer...")
+                self.run_command("sh get-docker.sh", sudo_pw=pw)
+                self.log("Docker installed successfully.")
+                docker_installed = True
+            
+            # ALWAYS ensure user is in the docker group (even if docker was already installed)
+            if docker_installed:
+                user = os.getenv('USER')
+                self.log(f"Ensuring {user} is in 'docker' group...")
+                try:
+                    self.run_command(f"usermod -aG docker {user}", sudo_pw=pw)
+                except Exception as e:
+                    self.log(f"Warning: Could not add user to group: {e}")
+
+            # 1.5. Stop existing Immich instances if checkbox is checked
+            if self.stop_existing_var.get():
+                self.log("-----------------------------------------")
+                self.stop_existing_immich(pw)
+                self.log("-----------------------------------------")
+
+            # Ensure Install Directory exists
+            if not os.path.exists(inst_path):
+                os.makedirs(inst_path)
+
+            # 2. Generate Credentials & Config
+            db_password = secrets.token_urlsafe(16)
+            
+            # 3. Create docker-compose.yml
+            compose_content = DOCKER_COMPOSE_TEMPLATE.format(
+                PHOTOS_PATH=p_path,
+                EXTERNAL_LIB_PATH=ext_path,
+                DB_PASSWORD=db_password,
+                INSTALL_PATH=inst_path
+            )
+
+            # 4. Create .env file
+            env_content = ENV_TEMPLATE.format(
+                PHOTOS_PATH=p_path,
+                DB_PASSWORD=db_password
+            )
+
+            self.log(f"Writing configuration files to {inst_path}...")
+            
+            with open(os.path.join(inst_path, "docker-compose.yml"), "w") as f:
+                f.write(compose_content)
+            
+            with open(os.path.join(inst_path, ".env"), "w") as f:
+                f.write(env_content)
+
+            # 5. Pull Images (with logging)
+            self.log("-----------------------------------------")
+            self.log("Downloading Immich Images...")
+            self.log("This may take a while. Please wait...")
+            
+            # We explicitly pull first to show the download logs
+            self.run_live_command("docker compose pull", sudo_pw=pw, cwd=inst_path)
+            
+            # 6. Start Immich
+            self.log("-----------------------------------------")
+            self.log("Starting Immich containers...")
+            self.run_live_command("docker compose up -d", sudo_pw=pw, cwd=inst_path)
+
+            self.log("-----------------------------------------")
+            self.log("SUCCESS! Immich is starting up.")
+            self.log("Access Immich at: http://<YOUR_PI_IP>:2283")
+            self.log("-----------------------------------------")
+            self.log("NOTE: To run 'docker' commands without sudo later,")
+            self.log("you MUST reboot your Raspberry Pi or log out/in.")
+            self.log("-----------------------------------------")
+            messagebox.showinfo("Success", "Immich Installed!\n\nPlease reboot your system to finalize Docker permissions.")
+
+        except Exception as e:
+            self.log(f"ERROR: {str(e)}")
+            messagebox.showerror("Installation Failed", str(e))
+        finally:
+            self.btn_install.config(state='normal')
+            if os.path.exists("get-docker.sh"):
+                os.remove("get-docker.sh")
+
+    def start_install(self):
+        self.btn_install.config(state='disabled')
+        threading.Thread(target=self.install_logic, daemon=True).start()
+
+if __name__ == "__main__":
     root = tk.Tk()
-    app = ImmichInstaller(root)
+    app = ImmichInstallerApp(root)
     root.mainloop()
-
-
-if __name__ == '__main__':
-    main()
