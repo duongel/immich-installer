@@ -173,7 +173,7 @@ class ImmichInstallerApp:
         
         stop_existing_check = tk.Checkbutton(
             stop_frame, 
-            text='Stop existing Immich instances before installation',
+            text='⚠️ Completely remove existing Immich instances (including database)',
             variable=self.stop_existing_var,
             font=('Arial', 10, 'bold')
         )
@@ -182,9 +182,9 @@ class ImmichInstallerApp:
         # Info label for checkbox
         info_label = tk.Label(
             stop_frame,
-            text='Recommended: Prevents port conflicts by stopping all running Immich containers',
+            text='WARNING: This will delete ALL containers, volumes, networks, and database data for existing Immich installations',
             font=('Arial', 9),
-            fg='#666666',
+            fg='#CC0000',
             wraplength=550,
             justify=tk.LEFT
         )
@@ -259,34 +259,91 @@ class ImmichInstallerApp:
         except Exception as e:
             raise e
 
-    def stop_existing_immich(self, sudo_pw):
-        """Stop all running Immich containers"""
+    def completely_remove_immich(self, sudo_pw):
+        """Completely remove all Immich containers, volumes, networks, and data"""
         try:
-            self.log("Checking for existing Immich containers...")
+            self.log("=" * 60)
+            self.log("REMOVING EXISTING IMMICH INSTALLATION")
+            self.log("=" * 60)
             
-            # Find all running containers with 'immich' in the name
-            result = self.run_command("docker ps -q --filter name=immich", sudo_pw=sudo_pw)
+            # Step 1: Find all running Immich containers
+            self.log("Step 1: Searching for running Immich containers...")
+            try:
+                result = self.run_command("docker ps -q --filter name=immich", sudo_pw=sudo_pw)
+                if result.strip():
+                    container_ids = result.strip().split('\n')
+                    self.log(f"Found {len(container_ids)} running container(s)")
+                    
+                    # Stop running containers
+                    self.log("Stopping running containers...")
+                    self.run_command(f"docker container stop {' '.join(container_ids)}", sudo_pw=sudo_pw)
+                    self.log("✓ Containers stopped")
+                else:
+                    self.log("No running Immich containers found")
+            except Exception as e:
+                self.log(f"Warning: {e}")
             
-            if result.strip():
-                container_ids = result.strip().split('\n')
-                self.log(f"Found {len(container_ids)} running Immich container(s)")
-                
-                # Stop containers
-                self.log("Stopping existing Immich containers...")
-                self.run_command(f"docker container stop {' '.join(container_ids)}", sudo_pw=sudo_pw)
-                self.log("Existing Immich containers stopped successfully")
-                
-                # Optional: Remove stopped containers
-                self.log("Removing stopped Immich containers...")
-                self.run_command(f"docker container rm {' '.join(container_ids)}", sudo_pw=sudo_pw)
-                self.log("Stopped containers removed")
-            else:
-                self.log("No existing Immich containers found")
+            # Step 2: Remove ALL Immich containers (including stopped ones)
+            self.log("\nStep 2: Removing all Immich containers (including stopped)...")
+            try:
+                result = self.run_command("docker ps -aq --filter name=immich", sudo_pw=sudo_pw)
+                if result.strip():
+                    container_ids = result.strip().split('\n')
+                    self.log(f"Removing {len(container_ids)} container(s)...")
+                    self.run_command(f"docker container rm -f {' '.join(container_ids)}", sudo_pw=sudo_pw)
+                    self.log("✓ All Immich containers removed")
+                else:
+                    self.log("No Immich containers to remove")
+            except Exception as e:
+                self.log(f"Warning: {e}")
+            
+            # Step 3: Remove Immich volumes (this is critical for database password reset)
+            self.log("\nStep 3: Removing Immich volumes (including database)...")
+            try:
+                result = self.run_command("docker volume ls -q --filter name=immich", sudo_pw=sudo_pw)
+                if result.strip():
+                    volume_names = result.strip().split('\n')
+                    self.log(f"Found {len(volume_names)} volume(s) to remove:")
+                    for vol in volume_names:
+                        self.log(f"  - {vol}")
+                    
+                    self.run_command(f"docker volume rm -f {' '.join(volume_names)}", sudo_pw=sudo_pw)
+                    self.log("✓ All Immich volumes removed (database wiped)")
+                else:
+                    self.log("No Immich volumes found")
+            except Exception as e:
+                self.log(f"Warning: {e}")
+            
+            # Step 4: Remove Immich networks
+            self.log("\nStep 4: Removing Immich networks...")
+            try:
+                result = self.run_command("docker network ls -q --filter name=immich", sudo_pw=sudo_pw)
+                if result.strip():
+                    network_ids = result.strip().split('\n')
+                    self.log(f"Removing {len(network_ids)} network(s)...")
+                    self.run_command(f"docker network rm {' '.join(network_ids)}", sudo_pw=sudo_pw)
+                    self.log("✓ Immich networks removed")
+                else:
+                    self.log("No Immich networks to remove")
+            except Exception as e:
+                self.log(f"Warning: {e}")
+            
+            # Step 5: Clean up any orphaned volumes
+            self.log("\nStep 5: Cleaning up orphaned volumes...")
+            try:
+                self.run_command("docker volume prune -f", sudo_pw=sudo_pw)
+                self.log("✓ Orphaned volumes cleaned")
+            except Exception as e:
+                self.log(f"Warning: {e}")
+            
+            self.log("\n" + "=" * 60)
+            self.log("✓ COMPLETE REMOVAL FINISHED")
+            self.log("All Immich containers, volumes, and networks removed")
+            self.log("=" * 60 + "\n")
                 
         except Exception as e:
-            # Log warning but don't fail installation
-            self.log(f"Warning: Could not stop existing containers: {e}")
-            self.log("Continuing with installation...")
+            self.log(f"ERROR during removal: {str(e)}")
+            raise
 
     def install_logic(self):
         pw = self.root_pass.get()
@@ -331,11 +388,9 @@ class ImmichInstallerApp:
                 except Exception as e:
                     self.log(f"Warning: Could not add user to group: {e}")
 
-            # 1.5. Stop existing Immich instances if checkbox is checked
+            # 1.5. Completely remove existing Immich if checkbox is checked
             if self.stop_existing_var.get():
-                self.log("-----------------------------------------")
-                self.stop_existing_immich(pw)
-                self.log("-----------------------------------------")
+                self.completely_remove_immich(pw)
 
             # Ensure Install Directory exists
             if not os.path.exists(inst_path):
