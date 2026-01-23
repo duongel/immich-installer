@@ -11,6 +11,12 @@ This script automates the tedious setup process: it checks for system dependenci
 * **Smart Configuration:** Sets up `docker-compose.yml` and `.env` with correct ports (2283) and permissions.
 * **Real-time Logs:** See exactly what is happening during the download process.
 
+If this project makes your life easier, a donation of any amount is appreciated :-)
+
+<a href="https://www.paypal.com/donate?hosted_button_id=CKAK6UZFJ5ULU">
+  <img style="width:200px;" src="https://raw.githubusercontent.com/stefan-niedermann/paypal-donate-button/master/paypal-donate-button.png" alt="Donate with PayPal" />
+</a>
+
 ---
 
 # How to Use
