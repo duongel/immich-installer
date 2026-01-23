@@ -66,10 +66,10 @@ class App:
     def _ui(self):
         tk.Label(self.root, text="Immich Installer", font=("Arial", 16, "bold")).pack(pady=10)
         for label, var, hint in [
-            ("Root Password:", self.pw, "Required for sudo"),
-            ("Install Path:", self.install, "e.g. /home/pi/immich"),
-            ("Photos Path:", self.photos, "e.g. /home/pi/photos"),
-            ("External Library:", self.extlib, "e.g. /mnt/nas/photos"),
+            ("Root Password:", self.pw, "Required for sudo to install system services"),
+            ("Where to install Immich (DB/Config):", self.install, "absolute path e.g. /home/pi/immich"),
+            ("Where to store photo files:", self.photos, "absolute path e.g. /home/pi/photos"),
+            ("External Library Path:", self.extlib, "absolute path e.g. /mnt/nas/photos"),
         ]:
             f = tk.Frame(self.root)
             f.pack(fill='x', padx=10, pady=3)
