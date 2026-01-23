@@ -67,8 +67,8 @@ class App:
         tk.Label(self.root, text="Immich Installer", font=("Arial", 16, "bold")).pack(pady=10)
         for label, var, hint in [
             ("Root Password:", self.pw, "Required for sudo to install system services"),
-            ("Where to install Immich (DB/Config):", self.install, "absolute path e.g. /home/pi/immich"),
-            ("Where to store photo files:", self.photos, "absolute path e.g. /home/pi/photos"),
+            ("Where to install Immich:", self.install, "absolute path e.g. /home/<username>/immich"),
+            ("Where to store photo files:", self.photos, "absolute path e.g. /mnt/external_drive/photos"),
             ("External Library Path:", self.extlib, "absolute path e.g. /mnt/nas/photos"),
         ]:
             f = tk.Frame(self.root)
