@@ -6,6 +6,7 @@ import threading
 import secrets
 import time
 import urllib.request
+import shutil
 
 # Check for tkinter dependency explicitly to avoid silent crashes
 try:
@@ -179,6 +180,16 @@ class ImmichInstallerApp:
         )
         stop_existing_check.pack(anchor='w')
         
+        # Info label for checkbox
+        info_label = tk.Label(
+            stop_frame,
+            text='WARNING: This will delete ALL containers, volumes, networks, database data, and installation folders',
+            font=('Arial', 9),
+            fg='#CC0000',
+            wraplength=550,
+            justify=tk.LEFT
+        )
+        info_label.pack(anchor='w', padx=25)
 
         # Install Button
         self.btn_install = tk.Button(self.root, text="INSTALL IMMICH", bg="green", fg="white", font=("Arial", 12, "bold"), command=self.start_install)
@@ -249,62 +260,101 @@ class ImmichInstallerApp:
         except Exception as e:
             raise e
 
-    def completely_remove_immich(self, sudo_pw):
+    def find_immich_installations(self, sudo_pw):
+        """Find all possible Immich installation directories"""
+        self.log("Searching for existing Immich installations...")
+        
+        possible_locations = []
+        
+        # Method 1: Find docker-compose.yml files with 'immich' in them
+        try:
+            result = self.run_command(
+                "find /home -name 'docker-compose.yml' -type f 2>/dev/null | xargs grep -l 'immich' 2>/dev/null || true",
+                sudo_pw=sudo_pw
+            )
+            if result.strip():
+                for compose_file in result.strip().split('\n'):
+                    if compose_file:
+                        install_dir = os.path.dirname(compose_file)
+                        possible_locations.append(install_dir)
+                        self.log(f"  Found: {install_dir}")
+        except Exception as e:
+            self.log(f"  Search method 1 skipped: {e}")
+        
+        # Method 2: Look for common installation paths
+        common_paths = [
+            "/home/*/immich",
+            "/opt/immich",
+            "/srv/immich",
+            "/var/lib/immich"
+        ]
+        
+        for pattern in common_paths:
+            try:
+                result = self.run_command(f"ls -d {pattern} 2>/dev/null || true", sudo_pw=sudo_pw)
+                if result.strip():
+                    for path in result.strip().split('\n'):
+                        if path and path not in possible_locations:
+                            possible_locations.append(path)
+                            self.log(f"  Found: {path}")
+            except:
+                pass
+        
+        return possible_locations
+
+    def completely_remove_immich(self, sudo_pw, inst_path):
         """Completely remove all Immich containers, volumes, networks, and data"""
         try:
             self.log("=" * 60)
             self.log("REMOVING EXISTING IMMICH INSTALLATION")
             self.log("=" * 60)
             
-            # Step 1: Find all running Immich containers
-            self.log("Step 1: Searching for running Immich containers...")
-            try:
-                result = self.run_command("docker ps -q --filter name=immich", sudo_pw=sudo_pw)
-                if result.strip():
-                    container_ids = result.strip().split('\n')
-                    self.log(f"Found {len(container_ids)} running container(s)")
-                    
-                    # Stop running containers
-                    self.log("Stopping running containers...")
-                    self.run_command(f"docker container stop {' '.join(container_ids)}", sudo_pw=sudo_pw)
-                    self.log("✓ Containers stopped")
-                else:
-                    self.log("No running Immich containers found")
-            except Exception as e:
-                self.log(f"Warning: {e}")
+            # Step 1: Find all Immich installation directories
+            installation_dirs = self.find_immich_installations(sudo_pw)
             
-            # Step 2: Remove ALL Immich containers (including stopped ones)
-            self.log("\nStep 2: Removing all Immich containers (including stopped)...")
+            # Step 2: Stop and remove containers using docker compose down
+            self.log("\nStep 1: Stopping Immich using docker compose down...")
+            for install_dir in installation_dirs:
+                try:
+                    compose_file = os.path.join(install_dir, "docker-compose.yml")
+                    if os.path.exists(compose_file):
+                        self.log(f"Running 'docker compose down -v' in {install_dir}...")
+                        self.run_command("docker compose down -v --remove-orphans", sudo_pw=sudo_pw, cwd=install_dir)
+                        self.log(f"✓ Stopped and removed containers from {install_dir}")
+                except Exception as e:
+                    self.log(f"Warning: Could not run docker compose down in {install_dir}: {e}")
+            
+            # Step 3: Force remove any remaining Immich containers
+            self.log("\nStep 2: Force removing any remaining Immich containers...")
             try:
                 result = self.run_command("docker ps -aq --filter name=immich", sudo_pw=sudo_pw)
                 if result.strip():
                     container_ids = result.strip().split('\n')
-                    self.log(f"Removing {len(container_ids)} container(s)...")
-                    self.run_command(f"docker container rm -f {' '.join(container_ids)}", sudo_pw=sudo_pw)
-                    self.log("✓ All Immich containers removed")
+                    self.log(f"Force removing {len(container_ids)} container(s)...")
+                    self.run_command(f"docker rm -f {' '.join(container_ids)}", sudo_pw=sudo_pw)
+                    self.log("✓ Containers force removed")
                 else:
-                    self.log("No Immich containers to remove")
+                    self.log("No remaining containers found")
             except Exception as e:
                 self.log(f"Warning: {e}")
             
-            # Step 3: Remove Immich volumes (this is critical for database password reset)
-            self.log("\nStep 3: Removing Immich volumes (including database)...")
+            # Step 4: Remove Immich Docker volumes
+            self.log("\nStep 3: Removing Immich Docker volumes...")
             try:
                 result = self.run_command("docker volume ls -q --filter name=immich", sudo_pw=sudo_pw)
                 if result.strip():
                     volume_names = result.strip().split('\n')
-                    self.log(f"Found {len(volume_names)} volume(s) to remove:")
+                    self.log(f"Found {len(volume_names)} Docker volume(s):")
                     for vol in volume_names:
                         self.log(f"  - {vol}")
-                    
                     self.run_command(f"docker volume rm -f {' '.join(volume_names)}", sudo_pw=sudo_pw)
-                    self.log("✓ All Immich volumes removed (database wiped)")
+                    self.log("✓ Docker volumes removed")
                 else:
-                    self.log("No Immich volumes found")
+                    self.log("No Immich Docker volumes found")
             except Exception as e:
                 self.log(f"Warning: {e}")
             
-            # Step 4: Remove Immich networks
+            # Step 5: Remove Immich networks
             self.log("\nStep 4: Removing Immich networks...")
             try:
                 result = self.run_command("docker network ls -q --filter name=immich", sudo_pw=sudo_pw)
@@ -312,14 +362,58 @@ class ImmichInstallerApp:
                     network_ids = result.strip().split('\n')
                     self.log(f"Removing {len(network_ids)} network(s)...")
                     self.run_command(f"docker network rm {' '.join(network_ids)}", sudo_pw=sudo_pw)
-                    self.log("✓ Immich networks removed")
+                    self.log("✓ Networks removed")
                 else:
-                    self.log("No Immich networks to remove")
+                    self.log("No Immich networks found")
             except Exception as e:
                 self.log(f"Warning: {e}")
             
-            # Step 5: Clean up any orphaned volumes
-            self.log("\nStep 5: Cleaning up orphaned volumes...")
+            # Step 6: CRITICAL - Remove bind-mounted PostgreSQL data directories
+            self.log("\nStep 5: Removing bind-mounted PostgreSQL data directories...")
+            for install_dir in installation_dirs:
+                postgres_dir = os.path.join(install_dir, "postgres")
+                if os.path.exists(postgres_dir):
+                    self.log(f"Deleting PostgreSQL data at: {postgres_dir}")
+                    try:
+                        # Use sudo to remove as postgres user may own these files
+                        self.run_command(f"rm -rf '{postgres_dir}'", sudo_pw=sudo_pw)
+                        self.log(f"✓ Deleted: {postgres_dir}")
+                    except Exception as e:
+                        self.log(f"Error deleting {postgres_dir}: {e}")
+                        # Try with shutil as fallback
+                        try:
+                            shutil.rmtree(postgres_dir, ignore_errors=True)
+                            self.log(f"✓ Deleted (fallback): {postgres_dir}")
+                        except Exception as e2:
+                            self.log(f"Could not delete {postgres_dir}: {e2}")
+            
+            # Step 7: Also check the new installation path
+            if inst_path:
+                postgres_dir = os.path.join(inst_path, "postgres")
+                if os.path.exists(postgres_dir):
+                    self.log(f"Deleting PostgreSQL data at new install path: {postgres_dir}")
+                    try:
+                        self.run_command(f"rm -rf '{postgres_dir}'", sudo_pw=sudo_pw)
+                        self.log(f"✓ Deleted: {postgres_dir}")
+                    except Exception as e:
+                        try:
+                            shutil.rmtree(postgres_dir, ignore_errors=True)
+                            self.log(f"✓ Deleted (fallback): {postgres_dir}")
+                        except:
+                            self.log(f"Warning: Could not delete {postgres_dir}")
+                
+                # Also remove any leftover .env and docker-compose.yml
+                for filename in ['.env', 'docker-compose.yml']:
+                    filepath = os.path.join(inst_path, filename)
+                    if os.path.exists(filepath):
+                        try:
+                            os.remove(filepath)
+                            self.log(f"✓ Removed old {filename}")
+                        except Exception as e:
+                            self.log(f"Warning: Could not remove {filepath}: {e}")
+            
+            # Step 8: Clean up orphaned volumes
+            self.log("\nStep 6: Cleaning up orphaned Docker volumes...")
             try:
                 self.run_command("docker volume prune -f", sudo_pw=sudo_pw)
                 self.log("✓ Orphaned volumes cleaned")
@@ -328,7 +422,8 @@ class ImmichInstallerApp:
             
             self.log("\n" + "=" * 60)
             self.log("✓ COMPLETE REMOVAL FINISHED")
-            self.log("All Immich containers, volumes, and networks removed")
+            self.log("All Immich containers, volumes, networks, and data removed")
+            self.log("Database will be created fresh with new password")
             self.log("=" * 60 + "\n")
                 
         except Exception as e:
@@ -380,14 +475,16 @@ class ImmichInstallerApp:
 
             # 1.5. Completely remove existing Immich if checkbox is checked
             if self.stop_existing_var.get():
-                self.completely_remove_immich(pw)
+                self.completely_remove_immich(pw, inst_path)
 
             # Ensure Install Directory exists
             if not os.path.exists(inst_path):
                 os.makedirs(inst_path)
+                self.log(f"Created installation directory: {inst_path}")
 
             # 2. Generate Credentials & Config
             db_password = secrets.token_urlsafe(16)
+            self.log(f"Generated new database password: {db_password[:8]}... (truncated)")
             
             # 3. Create docker-compose.yml
             compose_content = DOCKER_COMPOSE_TEMPLATE.format(
@@ -410,6 +507,8 @@ class ImmichInstallerApp:
             
             with open(os.path.join(inst_path, ".env"), "w") as f:
                 f.write(env_content)
+            
+            self.log("✓ Configuration files written")
 
             # 5. Pull Images (with logging)
             self.log("-----------------------------------------")
