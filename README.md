@@ -20,6 +20,7 @@ This script automates the tedious setup process: it checks for system dependenci
 1. Click the green **Code** button above and select **Download ZIP**.
 2. Extract the files on your computer.
 3. Double click on `installer.py`
+4. Select "Execute"
 
 
 #### Method 2: Command Line

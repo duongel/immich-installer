@@ -122,7 +122,7 @@ class ImmichInstallerApp:
         # 1. Root Password
         frame1 = tk.Frame(self.root)
         frame1.pack(fill='x', padx=10, pady=5)
-        tk.Label(frame1, text="1. Root Password (sudo):", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
+        tk.Label(frame1, text="Root Password (sudo):", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
         tk.Entry(frame1, textvariable=self.root_pass, show="*").pack(side='left', fill='x', expand=True)
         # Hint 1
         tk.Label(self.root, text="Required to install Docker and system services.", 
@@ -133,7 +133,7 @@ class ImmichInstallerApp:
         # 2. Install Path
         frame2 = tk.Frame(self.root)
         frame2.pack(fill='x', padx=10, pady=5)
-        tk.Label(frame2, text="2. Where to install Immich:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
+        tk.Label(frame2, text="Where to install Immich:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
         tk.Entry(frame2, textvariable=self.install_path).pack(side='left', fill='x', expand=True)
         tk.Button(frame2, text="Browse", command=lambda: self.browse_dir(self.install_path)).pack(side='left', padx=5)
         # Hint 2
@@ -145,7 +145,7 @@ class ImmichInstallerApp:
         # 3. Photos Path
         frame3 = tk.Frame(self.root)
         frame3.pack(fill='x', padx=10, pady=5)
-        tk.Label(frame3, text="3. Where to store photo files:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
+        tk.Label(frame3, text="Where to store photo files:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
         tk.Entry(frame3, textvariable=self.photos_path).pack(side='left', fill='x', expand=True)
         tk.Button(frame3, text="Browse", command=lambda: self.browse_dir(self.photos_path)).pack(side='left', padx=5)
         # Hint 3
@@ -157,7 +157,7 @@ class ImmichInstallerApp:
         # 4. External Library
         frame4 = tk.Frame(self.root)
         frame4.pack(fill='x', padx=10, pady=5)
-        tk.Label(frame4, text="4. External Library Path:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
+        tk.Label(frame4, text="External Library Path:", width=25, anchor='w', font=("Arial", 10, "bold")).pack(side='left')
         tk.Entry(frame4, textvariable=self.ext_lib_path).pack(side='left', fill='x', expand=True)
         tk.Button(frame4, text="Browse", command=lambda: self.browse_dir(self.ext_lib_path)).pack(side='left', padx=5)
         # Hint 4
