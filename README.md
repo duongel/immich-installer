@@ -56,13 +56,14 @@ _Note: If you are accessing it from the same device, you can use `http://localho
 ### Post-Install: Setting up External Library
 
 If you provided a path for an External Library (e.g., /media/hdd/photos) during installation, follow these steps to make them visible in Immich:
-- Log in to Immich as the Admin user.
-- Click on Administration (top right corner).
-- Go to **External Libraries** in the sidebar.
-- Click **Create Library**.
-- Important: Under "Import Paths", enter the exact same path you entered in the installer (e.g. /mnt/nas/photos).
-- Click Create -> Save.
-- Click the "..." menu on your new library and select Scan New Library Files.
+- Log in to Immich as the Admin user
+- Click on your user icon and then **Administration** (top right corner)
+- Go to **External Libraries** in the left sidebar
+- Click **Create Library** on top right corner
+- Click on **Add Folder** in settings of External Library
+- Important: Under **Path**, enter the exact same path you entered in the installer (e.g. /mnt/nas/photos)
+- Click **Add**
+- Click **Scan** in top right corner
 
 ---
 
