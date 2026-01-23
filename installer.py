@@ -180,16 +180,6 @@ class ImmichInstallerApp:
         )
         stop_existing_check.pack(anchor='w')
         
-        # Info label for checkbox
-        info_label = tk.Label(
-            stop_frame,
-            text='WARNING: This will delete ALL containers, volumes, networks, database data, and installation folders',
-            font=('Arial', 9),
-            fg='#CC0000',
-            wraplength=550,
-            justify=tk.LEFT
-        )
-        info_label.pack(anchor='w', padx=25)
 
         # Install Button
         self.btn_install = tk.Button(self.root, text="INSTALL IMMICH", bg="green", fg="white", font=("Arial", 12, "bold"), command=self.start_install)
